@@ -48,6 +48,8 @@ const repairs = [
     time: "15 MIN",
     icon: "🎧",
     tags: ["headphones", "audio", "jack", "wire"],
+    videoId: "kYj2zRVrfLg",
+    videoBy: "iFixit",
     intro: "Diagnose crackling audio and secure a loose 3.5 mm connection.",
     steps: ["Test the cable and audio source", "Clean the jack safely", "Secure and retest the connection"],
   },
@@ -58,6 +60,8 @@ const repairs = [
     time: "10 MIN",
     icon: "🎒",
     tags: ["backpack", "bag", "zipper", "school"],
+    videoId: "kmsA7PLCcTs",
+    videoBy: "Sewing & zipper tutorial",
     intro: "Make a broken zipper easy to grip again with a simple replacement pull.",
     steps: ["Check the zipper slider", "Attach the new pull", "Test and tighten it"],
   },
@@ -68,6 +72,8 @@ const repairs = [
     time: "20 MIN",
     icon: "🎮",
     tags: ["controller", "gaming", "buttons", "console"],
+    videoId: "PyFqkm7oIEk",
+    videoBy: "Controller repair tutorial",
     intro: "Clean sticky buttons without damaging the electronics inside.",
     steps: ["Power off and unplug", "Clean around each button", "Dry fully and test"],
   },
@@ -78,6 +84,8 @@ const repairs = [
     time: "12 MIN",
     icon: "🚲",
     tags: ["bike", "bicycle", "chain", "wheel"],
+    videoId: "EOEaxC8WV0c",
+    videoBy: "Canal de Bike",
     intro: "Put a slipped chain back on and check that it moves smoothly.",
     steps: ["Move the bike to a safe position", "Guide the chain onto the gear", "Turn the pedal and inspect"],
   },
@@ -88,6 +96,8 @@ const repairs = [
     time: "8 MIN",
     icon: "📱",
     tags: ["phone", "charging", "port", "cable"],
+    videoId: "5EH4hEZH8PA",
+    videoBy: "Tech repair tutorial",
     intro: "Remove pocket lint safely so the charging cable can connect properly.",
     steps: ["Power the phone off", "Inspect with a bright light", "Clean gently and reconnect"],
   },
@@ -98,9 +108,25 @@ const repairs = [
     time: "10 MIN",
     icon: "🧵",
     tags: ["shirt", "clothing", "button", "sewing"],
+    videoId: "MmcEF2GR584",
+    videoBy: "Sewing tutorial",
     intro: "Learn a durable hand stitch that keeps a replacement button secure.",
     steps: ["Thread and knot the needle", "Align and stitch the button", "Tie off and test"],
   },
+];
+
+const proVideos = [
+  { icon: "🔋", title: "Replace a phone battery", level: "ADVANCED", time: "35 MIN" },
+  { icon: "🎧", title: "Solder a broken headphone wire", level: "ADVANCED", time: "40 MIN" },
+  { icon: "🚲", title: "Tune a bike derailleur", level: "INTERMEDIATE", time: "30 MIN" },
+];
+
+const leaderboardPeople = [
+  { name: "Maya R.", week: 14, total: 87, streak: "12 day streak" },
+  { name: "Jordan K.", week: 11, total: 74, streak: "9 day streak" },
+  { name: "Alex T.", week: 9, total: 69, streak: "7 day streak" },
+  { name: "Sam P.", week: 7, total: 55, streak: "5 day streak" },
+  { name: "Noor A.", week: 5, total: 41, streak: "4 day streak" },
 ];
 
 const STORAGE_KEY = "repairhub-demo-progress-v1";
@@ -112,11 +138,10 @@ export default function Home() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [searchPerformed, setSearchPerformed] = useState(false);
   const [guideOpen, setGuideOpen] = useState(false);
-  const [watchProgress, setWatchProgress] = useState(0);
-  const [watching, setWatching] = useState(false);
   const [watchedRepairs, setWatchedRepairs] = useState<string[]>([]);
   const [completedSteps, setCompletedSteps] = useState<Record<string, number[]>>({});
   const [completedRepairs, setCompletedRepairs] = useState<string[]>([]);
+  const [leaderboardPeriod, setLeaderboardPeriod] = useState<"week" | "total">("week");
   const [hydrated, setHydrated] = useState(false);
 
   const activeRepair = repairs.find((repair) => repair.id === selectedRepair) ?? repairs[0];
@@ -128,6 +153,16 @@ export default function Home() {
   const stepTotal = Object.values(completedSteps).reduce((sum, steps) => sum + steps.length, 0);
   const xp = 240 + watchedRepairs.length * 10 + stepTotal * 5 + completedRepairs.length * 40;
   const badges = 4 + Math.floor(completedRepairs.length / 2);
+  const leaderboard = useMemo(
+    () =>
+      [...leaderboardPeople, {
+        name: "You",
+        week: completedRepairs.length,
+        total: repairTotal,
+        streak: "Your live progress",
+      }].sort((a, b) => b[leaderboardPeriod] - a[leaderboardPeriod]),
+    [completedRepairs.length, repairTotal, leaderboardPeriod],
+  );
 
   const results = useMemo(() => {
     const term = query.trim().toLowerCase();
@@ -159,29 +194,6 @@ export default function Home() {
       JSON.stringify({ watchedRepairs, completedSteps, completedRepairs }),
     );
   }, [hydrated, watchedRepairs, completedSteps, completedRepairs]);
-
-  useEffect(() => {
-    setWatching(false);
-    setWatchProgress(watchedRepairs.includes(activeRepair.id) ? 100 : 0);
-  }, [activeRepair.id, watchedRepairs]);
-
-  useEffect(() => {
-    if (!watching) return;
-    const timer = window.setInterval(() => {
-      setWatchProgress((current) => {
-        const next = Math.min(current + 10, 100);
-        if (next === 100) {
-          setWatching(false);
-          setWatchedRepairs((items) =>
-            items.includes(activeRepair.id) ? items : [...items, activeRepair.id],
-          );
-          setNotice("Video watched — you earned +10 XP!");
-        }
-        return next;
-      });
-    }, 280);
-    return () => window.clearInterval(timer);
-  }, [watching, activeRepair.id]);
 
   const startRepair = (repairId = selectedRepair) => {
     const repair = repairs.find((item) => item.id === repairId) ?? repairs[0];
@@ -229,6 +241,12 @@ export default function Home() {
     setNotice("Repair complete! +1 repair and +40 XP. Great work!");
   };
 
+  const confirmWatched = () => {
+    if (hasWatched) return;
+    setWatchedRepairs((items) => [...items, activeRepair.id]);
+    setNotice("Video watched — you earned +10 XP!");
+  };
+
   return (
     <main>
       <nav className="nav" aria-label="Main navigation">
@@ -247,6 +265,7 @@ export default function Home() {
         <div className={`nav-links ${menuOpen ? "open" : ""}`}>
           <a href="#problem" onClick={() => setMenuOpen(false)}>The problem</a>
           <a href="#solution" onClick={() => setMenuOpen(false)}>Our solution</a>
+          <a href="#leaderboard" onClick={() => setMenuOpen(false)}>Leaderboard</a>
           <a href="#impact" onClick={() => setMenuOpen(false)}>Impact</a>
           <a href="#team" onClick={() => setMenuOpen(false)}>Team</a>
         </div>
@@ -403,6 +422,16 @@ export default function Home() {
             <div className="search-empty">
               <b>No exact match yet.</b>
               <p>Try “headphones”, “bike”, “phone”, “controller”, “shirt”, or “backpack”.</p>
+              <div className="expert-help">
+                <span className="expert-avatar">☎</span>
+                <div>
+                  <small>NEED A HUMAN?</small>
+                  <strong>Call a RepairHub expert</strong>
+                  <p>Mon–Fri 3:30–8:00 PM · Sat 10:00 AM–4:00 PM<br />Pacific Time</p>
+                </div>
+                <a href="tel:+16045550142">+1 (604) 555-0142</a>
+              </div>
+              <small className="prototype-note">Prototype contact number for the project demo.</small>
             </div>
           )}
         </div>
@@ -410,27 +439,21 @@ export default function Home() {
         {guideOpen && (
           <article className="guide-panel" aria-live="polite">
             <div className="guide-video">
-              <div className={`video-stage ${watching ? "playing" : ""}`}>
-                <span className="video-icon">{activeRepair.icon}</span>
-                <div className="video-rings"><i /><i /><i /></div>
-                <button
-                  className="play-button"
-                  onClick={() => !hasWatched && setWatching(!watching)}
-                  disabled={hasWatched}
-                  aria-label={hasWatched ? "Video watched" : watching ? "Pause demo video" : "Play demo video"}
-                >
-                  {hasWatched ? "✓" : watching ? "Ⅱ" : "▶"}
-                </button>
-                <div className="video-caption">
-                  <span>REPAIR VIDEO · {activeRepair.time}</span>
-                  <b>{activeRepair.name}</b>
-                </div>
+              <div className="video-embed">
+                <iframe
+                  src={`https://www.youtube-nocookie.com/embed/${activeRepair.videoId}?rel=0`}
+                  title={`${activeRepair.name} video tutorial`}
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                  allowFullScreen
+                />
               </div>
-              <div className="video-progress"><i style={{ width: `${watchProgress}%` }} /></div>
-              <div className="video-status">
-                <span>{hasWatched ? "Watched · +10 XP earned" : watching ? `Watching… ${watchProgress}%` : "Watch the demo to earn +10 XP"}</span>
-                <b>{watchProgress}%</b>
+              <div className="video-credit">
+                <span>VIDEO TUTORIAL · {activeRepair.videoBy}</span>
+                <a href={`https://www.youtube.com/watch?v=${activeRepair.videoId}`} target="_blank" rel="noreferrer">Open on YouTube ↗</a>
               </div>
+              <button className={`watched-button ${hasWatched ? "done" : ""}`} onClick={confirmWatched} disabled={hasWatched}>
+                {hasWatched ? "✓ Watched · +10 XP earned" : "I watched this video · Earn +10 XP"}
+              </button>
             </div>
 
             <div className="guide-steps">
@@ -497,11 +520,76 @@ export default function Home() {
           <div className="progress-milestones"><span className="done">●<small>START</small></span><span>●<small>25</small></span><span>●<small>50</small></span><span>●<small>75</small></span><span className="pro">★<small>PRO</small></span></div>
           <div className="progress-message"><b>{Math.max(100 - repairTotal, 0)} repairs to go</b><span>Every video, step, and completed repair now moves your account forward.</span></div>
         </div>
+        <div className="plan-comparison">
+          <article className="plan-card free-plan">
+            <div className="plan-top"><span>FREE</span><b>Start fixing today</b></div>
+            <ul>
+              <li>✓ Beginner repair videos</li>
+              <li>✓ Search, checklists, XP & badges</li>
+              <li>✓ Community leaderboard</li>
+              <li className="muted">— Includes ads</li>
+              <li className="muted">— No one-on-one sessions</li>
+            </ul>
+            <strong className="plan-status">YOUR CURRENT PLAN</strong>
+          </article>
+          <article className="plan-card pro-plan">
+            <div className="plan-top"><span>PRO ★</span><b>Unlock the full workshop</b></div>
+            <ul>
+              <li>✓ Everything in Free</li>
+              <li>✓ Advanced video library</li>
+              <li>✓ No ads</li>
+              <li>✓ 1:1 meetings with an expert</li>
+              <li>✓ Priority repair support</li>
+            </ul>
+            <strong className="plan-status">🔒 UNLOCK AT 100 REPAIRS</strong>
+          </article>
+        </div>
+        <div className="pro-library">
+          <div className="library-heading">
+            <div><small>PRO VIDEO LIBRARY</small><h3>Advanced repairs are waiting.</h3></div>
+            <span>🔒 {Math.max(100 - repairTotal, 0)} REPAIRS TO UNLOCK</span>
+          </div>
+          <div className="locked-grid">
+            {proVideos.map((video) => (
+              <article className="locked-video" key={video.title}>
+                <div className="locked-art"><span>{video.icon}</span><i>🔒</i></div>
+                <small>{video.level} · {video.time}</small>
+                <b>{video.title}</b>
+                <p>RepairHub Pro exclusive</p>
+              </article>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="leaderboard section-pad" id="leaderboard">
+        <div className="leaderboard-head">
+          <div>
+            <div className="section-label light"><span>06</span> Community leaderboard</div>
+            <h2>FIX MORE.<br /><em>CLIMB HIGHER.</em></h2>
+          </div>
+          <div className="period-toggle" aria-label="Leaderboard period">
+            <button className={leaderboardPeriod === "week" ? "active" : ""} onClick={() => setLeaderboardPeriod("week")}>THIS WEEK</button>
+            <button className={leaderboardPeriod === "total" ? "active" : ""} onClick={() => setLeaderboardPeriod("total")}>ALL TIME</button>
+          </div>
+        </div>
+        <div className="leaderboard-table">
+          <div className="leaderboard-labels"><span>RANK</span><span>FIXER</span><span>STATUS</span><span>REPAIRS</span></div>
+          {leaderboard.map((person, index) => (
+            <div className={`leader-row ${person.name === "You" ? "you" : ""}`} key={person.name}>
+              <strong>{index < 3 ? ["🥇", "🥈", "🥉"][index] : String(index + 1).padStart(2, "0")}</strong>
+              <div className="fixer"><i>{person.name.charAt(0)}</i><b>{person.name}</b>{person.name === "You" && <em>YOU</em>}</div>
+              <span>{person.streak}</span>
+              <b>{person[leaderboardPeriod]}</b>
+            </div>
+          ))}
+        </div>
+        <p className="leaderboard-note">Your rank updates instantly when you complete a repair in the interactive guide.</p>
       </section>
 
       <section className="impact section-pad" id="impact">
         <div className="impact-head">
-          <div className="section-label light"><span>06</span> The impact</div>
+          <div className="section-label light"><span>07</span> The impact</div>
           <h2>SMALL FIXES.<br /><em>REAL CHANGE.</em></h2>
         </div>
         <div className="impact-path">
@@ -521,7 +609,7 @@ export default function Home() {
       </section>
 
       <section className="team section-pad" id="team">
-        <div className="section-label"><span>07</span> The team</div>
+        <div className="section-label"><span>08</span> The team</div>
         <div className="team-heading"><h2>DE PROJECT 3</h2><p>Eight minds. One mission. A future worth fixing.</p></div>
         <div className="team-grid">
           {team.map((member, index) => (
