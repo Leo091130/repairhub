@@ -122,14 +122,34 @@ const proVideos = [
 ];
 
 const leaderboardPeople = [
-  { name: "Maya R.", week: 14, total: 87, streak: "12 day streak" },
-  { name: "Jordan K.", week: 11, total: 74, streak: "9 day streak" },
-  { name: "Alex T.", week: 9, total: 69, streak: "7 day streak" },
-  { name: "Sam P.", week: 7, total: 55, streak: "5 day streak" },
-  { name: "Noor A.", week: 5, total: 41, streak: "4 day streak" },
+  { name: "Maya R.", week: 14, total: 87, streak: "12 day streak", isYou: false },
+  { name: "Jordan K.", week: 11, total: 74, streak: "9 day streak", isYou: false },
+  { name: "Alex T.", week: 9, total: 69, streak: "7 day streak", isYou: false },
+  { name: "Sam P.", week: 7, total: 55, streak: "5 day streak", isYou: false },
+  { name: "Noor A.", week: 5, total: 41, streak: "4 day streak", isYou: false },
 ];
 
 const STORAGE_KEY = "repairhub-demo-progress-v1";
+const ACCOUNTS_KEY = "repairhub-demo-accounts-v1";
+const SESSION_KEY = "repairhub-demo-session-v1";
+
+type RepairHubUser = {
+  name: string;
+  email: string;
+};
+
+type RepairHubAccount = RepairHubUser & {
+  passwordHash: string;
+};
+
+const progressKeyFor = (email?: string) =>
+  email ? `${STORAGE_KEY}:${email.toLowerCase()}` : STORAGE_KEY;
+
+const hashPassword = async (password: string) => {
+  const data = new TextEncoder().encode(password);
+  const digest = await window.crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+};
 
 export default function Home() {
   const [query, setQuery] = useState("");
@@ -143,25 +163,34 @@ export default function Home() {
   const [completedRepairs, setCompletedRepairs] = useState<string[]>([]);
   const [leaderboardPeriod, setLeaderboardPeriod] = useState<"week" | "total">("week");
   const [hydrated, setHydrated] = useState(false);
+  const [currentUser, setCurrentUser] = useState<RepairHubUser | null>(null);
+  const [authOpen, setAuthOpen] = useState(false);
+  const [authMode, setAuthMode] = useState<"signin" | "register">("signin");
+  const [authName, setAuthName] = useState("");
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authError, setAuthError] = useState("");
+  const [authBusy, setAuthBusy] = useState(false);
 
   const activeRepair = repairs.find((repair) => repair.id === selectedRepair) ?? repairs[0];
   const activeSteps = completedSteps[activeRepair.id] ?? [];
   const allStepsDone = activeSteps.length === activeRepair.steps.length;
   const hasWatched = watchedRepairs.includes(activeRepair.id);
   const repairFinished = completedRepairs.includes(activeRepair.id);
-  const repairTotal = 12 + completedRepairs.length;
+  const repairTotal = (currentUser ? 0 : 12) + completedRepairs.length;
   const stepTotal = Object.values(completedSteps).reduce((sum, steps) => sum + steps.length, 0);
-  const xp = 240 + watchedRepairs.length * 10 + stepTotal * 5 + completedRepairs.length * 40;
-  const badges = 4 + Math.floor(completedRepairs.length / 2);
+  const xp = (currentUser ? 0 : 240) + watchedRepairs.length * 10 + stepTotal * 5 + completedRepairs.length * 40;
+  const badges = (currentUser ? 0 : 4) + Math.floor(completedRepairs.length / 2);
   const leaderboard = useMemo(
     () =>
       [...leaderboardPeople, {
-        name: "You",
+        name: currentUser?.name ?? "You",
         week: completedRepairs.length,
         total: repairTotal,
         streak: "Your live progress",
+        isYou: true,
       }].sort((a, b) => b[leaderboardPeriod] - a[leaderboardPeriod]),
-    [completedRepairs.length, repairTotal, leaderboardPeriod],
+    [completedRepairs.length, repairTotal, leaderboardPeriod, currentUser],
   );
 
   const results = useMemo(() => {
@@ -174,7 +203,10 @@ export default function Home() {
 
   useEffect(() => {
     try {
-      const saved = window.localStorage.getItem(STORAGE_KEY);
+      const session = window.localStorage.getItem(SESSION_KEY);
+      const user = session ? JSON.parse(session) as RepairHubUser : null;
+      setCurrentUser(user);
+      const saved = window.localStorage.getItem(progressKeyFor(user?.email));
       if (saved) {
         const progress = JSON.parse(saved);
         setWatchedRepairs(progress.watchedRepairs ?? []);
@@ -190,10 +222,91 @@ export default function Home() {
   useEffect(() => {
     if (!hydrated) return;
     window.localStorage.setItem(
-      STORAGE_KEY,
+      progressKeyFor(currentUser?.email),
       JSON.stringify({ watchedRepairs, completedSteps, completedRepairs }),
     );
-  }, [hydrated, watchedRepairs, completedSteps, completedRepairs]);
+  }, [hydrated, watchedRepairs, completedSteps, completedRepairs, currentUser]);
+
+  const loadProgress = (email?: string) => {
+    try {
+      const saved = window.localStorage.getItem(progressKeyFor(email));
+      const progress = saved ? JSON.parse(saved) : {};
+      setWatchedRepairs(progress.watchedRepairs ?? []);
+      setCompletedSteps(progress.completedSteps ?? {});
+      setCompletedRepairs(progress.completedRepairs ?? []);
+    } catch {
+      setWatchedRepairs([]);
+      setCompletedSteps({});
+      setCompletedRepairs([]);
+    }
+  };
+
+  const openAuth = (mode: "signin" | "register" = "signin") => {
+    setAuthMode(mode);
+    setAuthError("");
+    setAuthPassword("");
+    setAuthOpen(true);
+  };
+
+  const ensureSignedIn = () => {
+    if (currentUser) return true;
+    setNotice("Sign in to save this activity to your RepairHub profile.");
+    openAuth("signin");
+    return false;
+  };
+
+  const submitAuth = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const email = authEmail.trim().toLowerCase();
+    const name = authName.trim();
+    if (!email.includes("@") || authPassword.length < 4 || (authMode === "register" && name.length < 2)) {
+      setAuthError("Enter a valid email and a password with at least 4 characters.");
+      return;
+    }
+
+    setAuthBusy(true);
+    setAuthError("");
+    try {
+      const accounts = JSON.parse(window.localStorage.getItem(ACCOUNTS_KEY) ?? "[]") as RepairHubAccount[];
+      const passwordHash = await hashPassword(authPassword);
+      let user: RepairHubUser;
+
+      if (authMode === "register") {
+        if (accounts.some((account) => account.email === email)) {
+          setAuthError("An account with this email already exists on this device.");
+          return;
+        }
+        const account = { name, email, passwordHash };
+        window.localStorage.setItem(ACCOUNTS_KEY, JSON.stringify([...accounts, account]));
+        user = { name, email };
+      } else {
+        const account = accounts.find((item) => item.email === email);
+        if (!account || account.passwordHash !== passwordHash) {
+          setAuthError("Email or password does not match an account on this device.");
+          return;
+        }
+        user = { name: account.name, email: account.email };
+      }
+
+      loadProgress(user.email);
+      setCurrentUser(user);
+      window.localStorage.setItem(SESSION_KEY, JSON.stringify(user));
+      setAuthOpen(false);
+      setAuthPassword("");
+      setNotice(`Welcome, ${user.name}! Your repair progress is ready.`);
+    } catch {
+      setAuthError("This browser could not save the account. Please try again.");
+    } finally {
+      setAuthBusy(false);
+    }
+  };
+
+  const signOut = () => {
+    window.localStorage.removeItem(SESSION_KEY);
+    setCurrentUser(null);
+    loadProgress();
+    setNotice("You are signed out. Your account progress stays saved on this device.");
+  };
 
   const startRepair = (repairId = selectedRepair) => {
     const repair = repairs.find((item) => item.id === repairId) ?? repairs[0];
@@ -223,6 +336,7 @@ export default function Home() {
   };
 
   const toggleStep = (stepIndex: number) => {
+    if (!ensureSignedIn()) return;
     if (repairFinished) return;
     setCompletedSteps((current) => {
       const steps = current[activeRepair.id] ?? [];
@@ -236,12 +350,14 @@ export default function Home() {
   };
 
   const completeRepair = () => {
+    if (!ensureSignedIn()) return;
     if (!hasWatched || !allStepsDone || repairFinished) return;
     setCompletedRepairs((items) => [...items, activeRepair.id]);
     setNotice("Repair complete! +1 repair and +40 XP. Great work!");
   };
 
   const confirmWatched = () => {
+    if (!ensureSignedIn()) return;
     if (hasWatched) return;
     setWatchedRepairs((items) => [...items, activeRepair.id]);
     setNotice("Video watched — you earned +10 XP!");
@@ -254,6 +370,25 @@ export default function Home() {
           <span className="brand-mark"><i /><b>R</b></span>
           <span>Repair<span>Hub</span></span>
         </a>
+        <div className={`nav-links ${menuOpen ? "open" : ""}`}>
+          <a href="#problem" onClick={() => setMenuOpen(false)}>The problem</a>
+          <a href="#solution" onClick={() => setMenuOpen(false)}>Our solution</a>
+          <a href="#leaderboard" onClick={() => setMenuOpen(false)}>Leaderboard</a>
+          <a href="#impact" onClick={() => setMenuOpen(false)}>Impact</a>
+          <a href="#team" onClick={() => setMenuOpen(false)}>Team</a>
+        </div>
+        <div className="nav-actions">
+          {currentUser ? (
+            <div className="account-menu">
+              <span>{currentUser.name.charAt(0).toUpperCase()}</span>
+              <div><b>{currentUser.name}</b><small>{repairTotal} repairs</small></div>
+              <button onClick={signOut}>Sign out</button>
+            </div>
+          ) : (
+            <button className="account-button" onClick={() => openAuth("signin")}>Sign in</button>
+          )}
+          <button className="nav-cta" onClick={() => startRepair()}>Try RepairHub <span>↗</span></button>
+        </div>
         <button
           className="menu-button"
           aria-label="Toggle menu"
@@ -262,14 +397,6 @@ export default function Home() {
         >
           {menuOpen ? "×" : "☰"}
         </button>
-        <div className={`nav-links ${menuOpen ? "open" : ""}`}>
-          <a href="#problem" onClick={() => setMenuOpen(false)}>The problem</a>
-          <a href="#solution" onClick={() => setMenuOpen(false)}>Our solution</a>
-          <a href="#leaderboard" onClick={() => setMenuOpen(false)}>Leaderboard</a>
-          <a href="#impact" onClick={() => setMenuOpen(false)}>Impact</a>
-          <a href="#team" onClick={() => setMenuOpen(false)}>Team</a>
-        </div>
-        <button className="nav-cta" onClick={() => startRepair()}>Try RepairHub <span>↗</span></button>
       </nav>
 
       <section className="hero" id="top">
@@ -576,9 +703,9 @@ export default function Home() {
         <div className="leaderboard-table">
           <div className="leaderboard-labels"><span>RANK</span><span>FIXER</span><span>STATUS</span><span>REPAIRS</span></div>
           {leaderboard.map((person, index) => (
-            <div className={`leader-row ${person.name === "You" ? "you" : ""}`} key={person.name}>
+            <div className={`leader-row ${person.isYou ? "you" : ""}`} key={`${person.name}-${person.isYou ? "you" : "community"}`}>
               <strong>{index < 3 ? ["🥇", "🥈", "🥉"][index] : String(index + 1).padStart(2, "0")}</strong>
-              <div className="fixer"><i>{person.name.charAt(0)}</i><b>{person.name}</b>{person.name === "You" && <em>YOU</em>}</div>
+              <div className="fixer"><i>{person.name.charAt(0)}</i><b>{person.name}</b>{person.isYou && <em>YOU</em>}</div>
               <span>{person.streak}</span>
               <b>{person[leaderboardPeriod]}</b>
             </div>
@@ -617,6 +744,41 @@ export default function Home() {
           ))}
         </div>
       </section>
+
+      {authOpen && (
+        <div className="auth-overlay" role="dialog" aria-modal="true" aria-labelledby="auth-title" onMouseDown={(event) => event.target === event.currentTarget && setAuthOpen(false)}>
+          <div className="auth-card">
+            <button className="auth-close" aria-label="Close sign in" onClick={() => setAuthOpen(false)}>×</button>
+            <div className="auth-brand"><span className="brand-mark"><i /><b>R</b></span><b>Repair<span>Hub</span></b></div>
+            <small className="auth-kicker">SAVE YOUR SKILLS. KEEP YOUR STREAK.</small>
+            <h2 id="auth-title">{authMode === "signin" ? "WELCOME BACK." : "JOIN THE FIXERS."}</h2>
+            <p>{authMode === "signin" ? "Sign in to continue your repairs, XP, badges, and leaderboard journey." : "Create a profile to start saving your repair progress on this device."}</p>
+            <div className="auth-tabs">
+              <button className={authMode === "signin" ? "active" : ""} onClick={() => { setAuthMode("signin"); setAuthError(""); }}>SIGN IN</button>
+              <button className={authMode === "register" ? "active" : ""} onClick={() => { setAuthMode("register"); setAuthError(""); }}>CREATE ACCOUNT</button>
+            </div>
+            <form onSubmit={submitAuth}>
+              {authMode === "register" && (
+                <label>
+                  DISPLAY NAME
+                  <input value={authName} onChange={(event) => setAuthName(event.target.value)} autoComplete="name" placeholder="e.g. Leo" />
+                </label>
+              )}
+              <label>
+                EMAIL
+                <input type="email" value={authEmail} onChange={(event) => setAuthEmail(event.target.value)} autoComplete="email" placeholder="you@example.com" />
+              </label>
+              <label>
+                PASSWORD
+                <input type="password" value={authPassword} onChange={(event) => setAuthPassword(event.target.value)} autoComplete={authMode === "signin" ? "current-password" : "new-password"} placeholder="At least 4 characters" />
+              </label>
+              {authError && <div className="auth-error" role="alert">{authError}</div>}
+              <button className="auth-submit" disabled={authBusy}>{authBusy ? "PLEASE WAIT…" : authMode === "signin" ? "SIGN IN →" : "CREATE MY PROFILE →"}</button>
+            </form>
+            <small className="auth-note">Project demo: accounts and progress are saved only in this browser. Don&apos;t use a real password.</small>
+          </div>
+        </div>
+      )}
 
       <footer>
         <div className="footer-main">
